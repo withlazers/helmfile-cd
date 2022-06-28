@@ -25,5 +25,12 @@ else
 		"$GIT_REPOSITORY" /work/repo
 fi
 
+
 cd "/work/repo/$GIT_DIRECTORY"
-exec helmfile sync
+echo "##### Checking templates"
+helmfile template > /dev/null
+echo "##### Templates OK, rolling out"
+if ! helmfile apply; then
+	echo "##### helmfile apply failed, falling back to helmfile sync" >&2
+	exec helmfile sync
+fi
