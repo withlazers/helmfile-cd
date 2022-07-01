@@ -13,18 +13,23 @@ export GIT_SSH_COMMAND="$SSH"
 export GIT_ASKPASS="/askpass.sh"
 
 if [ -d /work/repo ]; then
+	git_rev_before=$(git -C /work/repo rev-parse HEAD)
 	git_branch=$(git -C /work/repo branch --show-current)
 	if [ -n "$GIT_BRANCH" ] && [ "$git_branch" != "$GIT_BRANCH" ]; then
 		die "Branch mismatch: $git_branch != $GIT_BRANCH"
 	fi
 	git -C /work/repo fetch origin "$git_branch"
 	git -C /work/repo reset --hard FETCH_HEAD
+
+	if git diff --quiet "$git_rev_before" HEAD; then
+		echo "No changes"
+		exit 0
+	fi
 else
 	git clone --depth 1 \
 		${GIT_BRANCH:+-b "${GIT_BRANCH}"} \
 		"$GIT_REPOSITORY" /work/repo
 fi
-
 
 cd "/work/repo/$GIT_DIRECTORY"
 echo "##### Checking templates"
