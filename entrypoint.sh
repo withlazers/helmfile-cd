@@ -4,38 +4,49 @@ die() {
 	exit 1
 }
 
-SSH='ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'
+echo '##### Configuration'
+ssh='ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'
 if [ -e "/auth/key" ]; then
-	SSH="$SSH -i /auth/key"
+	ssh="${ssh} -i /auth/key"
 fi
-
-export GIT_SSH_COMMAND="$SSH"
+export GIT_SSH_COMMAND="${ssh}"
 export GIT_ASKPASS="/askpass.sh"
 
+echo '##### Retrieve current revision'
 if [ -d /work/repo ]; then
-	git_rev_before=$(git -C /work/repo rev-parse HEAD)
-	git_branch=$(git -C /work/repo branch --show-current)
-	if [ -n "$GIT_BRANCH" ] && [ "$git_branch" != "$GIT_BRANCH" ]; then
-		die "Branch mismatch: $git_branch != $GIT_BRANCH"
+	GIT_BRANCH=$(git -C /work/repo branch --show-current)
+	if [ -n "${CONFIG_GIT_BRANCH}" ] && \
+			[ "${GIT_BRANCH}" != "${CONFIG_GIT_BRANCH}" ]; then
+		die "Branch mismatch: ${GIT_BRANCH} != ${CONFIG_GIT_BRANCH}"
 	fi
-	git -C /work/repo fetch origin "$git_branch"
+	git -C /work/repo fetch origin "${GIT_BRANCH}"
 	git -C /work/repo reset --hard FETCH_HEAD
-
-	if git diff --quiet "$git_rev_before" HEAD; then
-		echo "No changes"
-		exit 0
-	fi
 else
 	git clone --depth 1 \
-		${GIT_BRANCH:+-b "${GIT_BRANCH}"} \
-		"$GIT_REPOSITORY" /work/repo
+		${CONFIG_GIT_BRANCH:+-b "${CONFIG_GIT_BRANCH}"} \
+		"${CONFIG_GIT_REPOSITORY}" /work/repo
 fi
 
-cd "/work/repo/$GIT_DIRECTORY"
-echo "##### Checking templates"
-helmfile template > /dev/null
-echo "##### Templates OK, rolling out"
-if ! helmfile apply; then
-	echo "##### helmfile apply failed, falling back to helmfile sync" >&2
-	exec helmfile sync
+echo '##### Check for changes'
+NEW_GIT_REV=$(git -C /work/repo rev-parse HEAD)
+echo "Current state:    ${STATE_GIT_REV:-'<none>'}"
+echo "New state:        ${NEW_GIT_REV}"
+if [ -n "${STATE_GIT_REV}" ] && [ "${NEW_GIT_REV}" = "${STATE_GIT_REV}" ]; then
+	echo "-> No changes"
+	exit 0
 fi
+
+echo '##### Apply changes (helm sync)'
+cd "/work/repo/${CONFIG_GIT_DIRECTORY}"
+helmfile sync
+
+echo '##### Update state'
+exec kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${STATE_NAME}
+  namespace: ${NAMESPACE}
+data:
+  GIT_REV: "${NEW_GIT_REV}"
+EOF
